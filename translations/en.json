@@ -1,0 +1,33 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Connect to Cider RPC Server",
+                "description": "Set up your Cider Media Player. The server must be running and accessible.",
+                "data": {
+                    "host": "IP Address (e.g. 192.168.1.100)",
+                    "name": "Name"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Failed to connect. Please verify the IP address and that the server is running.",
+            "already_configured": "This Cider RPC server is already configured",
+            "unknown": "Unexpected error occurred"
+        },
+        "abort": {
+            "already_configured": "This Cider RPC server is already configured"
+        }
+    },
+    "entity": {
+        "media_player": {
+            "cider_player": {
+                "state": {
+                    "playing": "Playing",
+                    "paused": "Paused",
+                    "idle": "Idle"
+                }
+            }
+        }
+    }
+}
