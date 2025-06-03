@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.const import CONF_HOST, CONF_NAME
+from datetime import datetime, timezone, timedelta
 
 from .const import (
     DOMAIN,
@@ -38,17 +39,18 @@ async def async_setup_entry(
     app_token = entry.data[CONF_APP_TOKEN]
     port = entry.data.get(CONF_PORT, DEFAULT_PORT)
     use_ssl = entry.data.get(CONF_USE_SSL, False)
-    async_add_entities(
-        [CiderMediaPlayer(session, host, port, app_token, use_ssl)], True)
-
+    name = entry.data.get(CONF_NAME, DEFAULT_NAME)
+    async_add_entities([CiderMediaPlayer(session, host, port, app_token, use_ssl, name)], True)
 
 class CiderMediaPlayer(MediaPlayerEntity):
     """Representation of a Cider Media Player."""
 
     _attr_has_entity_name = True
     _attr_device_class = MediaPlayerDeviceClass.SPEAKER
+    _attr_should_poll = True  # Add this line
+    _attr_media_content_type = "music"
 
-    def __init__(self, session: aiohttp.ClientSession, host: str, port: str, app_token: str, use_ssl: bool = False) -> None:
+    def __init__(self, session: aiohttp.ClientSession, host: str, port: str, app_token: str, use_ssl: bool = False, name: str = DEFAULT_NAME) -> None:
         """Initialize the media player."""
         self._session = session
         self._host = host
@@ -57,8 +59,8 @@ class CiderMediaPlayer(MediaPlayerEntity):
         self._headers = {"apptoken": app_token}
         protocol = "https" if use_ssl else "http"
         self._base_url = f"{protocol}://{host}:{port}/api/v1/playback"
-        self._attr_unique_id = f"{DOMAIN}_media_player"
-        self._attr_name = DEFAULT_NAME
+        self._attr_unique_id = f"{DOMAIN}_{name}"
+        self._attr_name = name
         self._attr_supported_features = (
             MediaPlayerEntityFeature.PLAY
             | MediaPlayerEntityFeature.PAUSE
@@ -67,26 +69,30 @@ class CiderMediaPlayer(MediaPlayerEntity):
             | MediaPlayerEntityFeature.NEXT_TRACK
             | MediaPlayerEntityFeature.PREVIOUS_TRACK
             | MediaPlayerEntityFeature.SEEK
+            | MediaPlayerEntityFeature.VOLUME_MUTE
+            # | MediaPlayerEntityFeature.SELECT_SOURCE
+            # | MediaPlayerEntityFeature.BROWSE_MEDIA
+            # | MediaPlayerEntityFeature.PLAY_MEDIA
+            # | MediaPlayerEntityFeature.SELECT_SOUND_MODE
+            # | MediaPlayerEntityFeature.SHUFFLE_SET
+            # | MediaPlayerEntityFeature.REPEAT_SET
         )
 
-    async def _async_api_call(self, method: str, endpoint: str, data: dict = None) -> tuple[bool, dict]:
+    async def _async_api_call(self, method: str, endpoint: str, data: dict | None = None) -> tuple[bool, dict]:
         """Make an API call and handle errors."""
         try:
             kwargs = {"headers": self._headers}
             if method == "post" and data is not None:
                 kwargs["json"] = data
 
-            async with getattr(self._session, method)(
-                f"{self._base_url}/{endpoint}", 
-                **kwargs
-            ) as response:
+            async with getattr(self._session, method)(f"{self._base_url}/{endpoint}", **kwargs) as response:
                 if response.status == 200:
                     return True, await response.json() if method == "get" else {}
-                _LOGGER.error("API call failed with status %s: %s", response.status, await response.text())
+                _LOGGER.debug("API call failed with status %s: %s", response.status, await response.text())
                 return False, {}
         except aiohttp.ClientError as error:
-            _LOGGER.error("Failed to call %s: %s", endpoint, error)
-            self.state = MediaPlayerState.UNAVAILABLE
+            _LOGGER.debug("Failed to call %s: %s", endpoint, error)
+            self._attr_state = MediaPlayerState.OFF
             return False, {}
 
     async def async_update(self) -> None:
@@ -94,7 +100,7 @@ class CiderMediaPlayer(MediaPlayerEntity):
         # Update playing state
         success, data = await self._async_api_call("get", "is-playing")
         if success:
-            self.state = (
+            self._attr_state = (
                 MediaPlayerState.PLAYING if bool(data.get("is_playing"))
                 else MediaPlayerState.PAUSED
             )
@@ -102,38 +108,40 @@ class CiderMediaPlayer(MediaPlayerEntity):
         # Update volume
         success, data = await self._async_api_call("get", "volume")
         if success:
-            self.volume_level = float(data.get("volume"))
-            # Update current song info
-            success, data = await self._async_api_call("get", "now-playing")
-            if success:
-                info = data.get("info", {})
-                artwork = info.get("artwork", {})
-                self.media_title = info.get("name")
-                self.media_artist = info.get("artistName")
-                self.media_album_name = info.get("albumName")
-                self.media_album_artist = info.get("albumArtist")
-                self.media_duration = info.get("durationInMillis", 0) / 1000
-                self.media_position = info.get("playbackPosition", 0)
-                self.media_position_updated_at = None  # Will be set by HA
-                self.media_image_url = artwork.get("url") if artwork else None
+            self._attr_volume_level = float(data.get("volume", 0))
+
+        # Update current song info
+        success, data = await self._async_api_call("get", "now-playing")
+        if success:
+            info = data.get("info", {})
+            artwork = info.get("artwork", {})
+            self._attr_media_title = info.get("name", "")
+            self._attr_media_artist = info.get("artistName", "")
+            self._attr_media_album_name = info.get("albumName", "")
+            self._attr_media_album_artist = info.get("artistName", "")
+            self._attr_media_image_url = artwork.get("url") if artwork else None
+            self._attr_media_duration = info.get("durationInMillis", 0) / 1000
+            self._attr_media_position = info.get("currentPlaybackTime", 0) / 1000
+            self._attr_media_position_updated_at = datetime.now(timezone.utc) - timedelta(seconds=info.get("currentPlaybackTime", 0))
+
 
     async def async_media_play(self) -> None:
         """send play command."""
         success, _ = await self._async_api_call("post", "play", data={})
         if success:
-             self.state = MediaPlayerState.PLAYING
+            self._attr_state = MediaPlayerState.PLAYING
 
     async def async_media_pause(self) -> None:
         """send pause command."""
         success, _ = await self._async_api_call("post", "pause", data={})
         if success:
-            self.state = MediaPlayerState.PAUSED
+            self._attr_state = MediaPlayerState.PAUSED
 
     async def async_media_stop(self) -> None:
         """send stop command."""
         success, _ = await self._async_api_call("post", "stop", data={})
         if success:
-            self.state = MediaPlayerState.IDLE
+            self._attr_state = MediaPlayerState.IDLE
 
     async def async_media_next_track(self) -> None:
         """Send next track command."""
@@ -151,4 +159,4 @@ class CiderMediaPlayer(MediaPlayerEntity):
 
     async def async_media_seek(self, position: float) -> None:
         """Seek to position."""
-        await self._async_api_call("post", f"seek/{position}", data={})
+        await self._async_api_call("post", "seek", data={"position": position})
