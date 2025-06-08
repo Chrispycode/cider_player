@@ -25,6 +25,7 @@ This integration supports config flow, which means you can configure it entirely
 
 - Cider player's IP address
 - Port number (if different from default)
+- Cider API Token (If enabled)
 
 ## Requirements
 
