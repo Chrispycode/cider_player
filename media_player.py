@@ -50,6 +50,17 @@ class CiderMediaPlayer(MediaPlayerEntity):
     _attr_should_poll = True  # Add this line
     _attr_media_content_type = "music"
 
+    @property
+    def icon(self) -> str | None:
+        """Return the icon to use in the frontend."""
+        if self.state == MediaPlayerState.PLAYING:
+            return "mdi:speaker-pause"
+        elif self.state == MediaPlayerState.PAUSED:
+            return "mdi:speaker-play"
+        elif self.state == MediaPlayerState.IDLE:
+            return "mdi:speaker-off"
+        return "mdi:speaker-off"
+
     def __init__(self, session: aiohttp.ClientSession, host: str, port: str, app_token: str, use_ssl: bool = False, name: str = DEFAULT_NAME) -> None:
         """Initialize the media player."""
         self._session = session
@@ -100,10 +111,7 @@ class CiderMediaPlayer(MediaPlayerEntity):
         # Update playing state
         success, data = await self._async_api_call("get", "is-playing")
         if success:
-            self._attr_state = (
-                MediaPlayerState.PLAYING if bool(data.get("is_playing"))
-                else MediaPlayerState.PAUSED
-            )
+            self._attr_state = (MediaPlayerState.PLAYING if bool(data.get("is_playing")) else MediaPlayerState.PAUSED)
 
         # Update volume
         success, data = await self._async_api_call("get", "volume")
